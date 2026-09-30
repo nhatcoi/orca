@@ -1,16 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { rmSync, mkdtempSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import type { PersistedState } from '../shared/persisted-state-types'
-import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../shared/execution-host'
 import {
+  closeTestStores,
   testState,
   createStore,
   writeDataFile,
   readDataFile,
   makeRepo
 } from './persistence-test-harness'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { rmSync, mkdtempSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import type { PersistedState } from '../shared/persisted-state-types'
+import { toRuntimeExecutionHostId, toSshExecutionHostId } from '../shared/execution-host'
 
 // Stub the ~/.ssh/config parser so the SSH-import test drives the real Store with deterministic hosts, not the operator's actual ~/.ssh/config.
 const { loadUserSshConfigMock, sshConfigHostsToTargetsMock } = vi.hoisted(() => ({
@@ -60,7 +61,8 @@ describe('Store', () => {
     getCohortAtEmitMock.mockReturnValue({ nth_repo_added: 2 })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await closeTestStores()
     rmSync(testState.dir, { recursive: true, force: true })
   })
   it('can clear an automation back to the project default branch', async () => {
@@ -84,6 +86,28 @@ describe('Store', () => {
     store.flush()
     const persisted = readDataFile() as { automations: { baseBranch: string | null }[] }
     expect(persisted.automations[0].baseBranch).toBeNull()
+  })
+
+  it('returns the existing automation for a repeated creation key', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const input = {
+      creationKey: 'move-retry-1',
+      name: 'Retry-safe move',
+      prompt: 'Run checks',
+      agentId: 'claude' as const,
+      projectId: 'r1',
+      workspaceMode: 'new_per_run' as const,
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-13T00:00:00Z').getTime()
+    }
+
+    const first = store.createAutomation(input)
+    const retry = store.createAutomation({ ...input, name: 'Changed by a retry' })
+
+    expect(retry.id).toBe(first.id)
+    expect(store.listAutomations()).toHaveLength(1)
   })
 
   it('persists session reuse only for existing-workspace automations', async () => {

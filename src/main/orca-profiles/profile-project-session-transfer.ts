@@ -1,6 +1,11 @@
 import { getDefaultWorkspaceSession } from '../../shared/constants'
 import type { ExecutionHostId } from '../../shared/execution-host'
-import type { BrowserPage, BrowserWorkspace } from '../../shared/browser-workspace-types'
+import type {
+  BrowserPage,
+  BrowserPageDocLocation,
+  BrowserWorkspace
+} from '../../shared/browser-workspace-types'
+import { remapBrowserPageDocLocation } from '../../shared/browser-page-doc-location'
 import type { Tab, TabGroup } from '../../shared/tab-types'
 import type { TerminalTab } from '../../shared/terminal-tab-types'
 import type {
@@ -110,6 +115,13 @@ export function extractSessionForTransfer(
       transferred.terminalLayoutsByTabId[tabId] = structuredClone(layout)
     }
   }
+  if (source.localOnlyScrollbackByTabId) {
+    transferred.localOnlyScrollbackByTabId = Object.fromEntries(
+      Object.entries(source.localOnlyScrollbackByTabId)
+        .filter(([tabId]) => copiedTerminalTabIds.has(tabId))
+        .map(([tabId, buffers]) => [tabId, structuredClone(buffers)])
+    )
+  }
   transferred.terminalPtyIncarnationsByPaneKey = Object.fromEntries(
     Object.entries(source.terminalPtyIncarnationsByPaneKey ?? {}).filter(([paneKey]) => {
       const separator = paneKey.lastIndexOf(':')
@@ -175,6 +187,9 @@ function rekeyBrowserWorkspace(
   return {
     ...structuredClone(workspace),
     worktreeId: rekeyWorktreeId(oldRepoId, newRepoId, workspace.worktreeId),
+    ...(workspace.docLocation
+      ? { docLocation: rekeyBrowserDocLocation(workspace.docLocation, oldRepoId, newRepoId) }
+      : {}),
     // Why: both the session profile and the resolved partition string are
     // source-profile-scoped; carrying either across would point the restored
     // pane at a partition the target profile's allowlist rejects.
@@ -186,8 +201,20 @@ function rekeyBrowserWorkspace(
 function rekeyBrowserPage(page: BrowserPage, oldRepoId: string, newRepoId: string): BrowserPage {
   return {
     ...structuredClone(page),
-    worktreeId: rekeyWorktreeId(oldRepoId, newRepoId, page.worktreeId)
+    worktreeId: rekeyWorktreeId(oldRepoId, newRepoId, page.worktreeId),
+    ...(page.docLocation
+      ? { docLocation: rekeyBrowserDocLocation(page.docLocation, oldRepoId, newRepoId) }
+      : {})
   }
+}
+
+function rekeyBrowserDocLocation(
+  location: BrowserPageDocLocation,
+  oldRepoId: string,
+  newRepoId: string
+): BrowserPageDocLocation {
+  const nextWorktreeId = rekeyWorktreeId(oldRepoId, newRepoId, location.worktreeId)
+  return remapBrowserPageDocLocation(location, location.worktreeId, nextWorktreeId)
 }
 
 function copyBrowserPages(

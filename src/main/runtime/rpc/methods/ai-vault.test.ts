@@ -25,6 +25,8 @@ import {
   AiVaultListSessionsParams,
   AiVaultPrepareSessionResumeParams
 } from './ai-vault'
+import { agentSessionRefusalError } from '../../../../shared/agent-session-wire-refusals'
+import { recordStructuredAgentSessionHostInstallRefusal } from '../../structured-agent-session-host-refusal'
 import {
   configureAiVaultSessionSources,
   listAiVaultSessions,
@@ -71,6 +73,7 @@ function makeDispatcher(): RpcDispatcher {
   // which delegates to the shared cache module the IPC handler also uses.
   const runtime = {
     getRuntimeId: () => 'test-runtime',
+    ensureStructuredAgentSessionHost: vi.fn(async () => undefined),
     listAiVaultSessions: (args?: Parameters<typeof listAiVaultSessions>[0]) =>
       listAiVaultSessions(args),
     resolveAiVaultSessionTitles: (requests: unknown[], signal?: AbortSignal) =>
@@ -82,6 +85,7 @@ function makeDispatcher(): RpcDispatcher {
 function makeFailingDispatcher(error: Error): RpcDispatcher {
   const runtime = {
     getRuntimeId: () => 'test-runtime',
+    ensureStructuredAgentSessionHost: vi.fn(async () => undefined),
     listAiVaultSessions: vi.fn().mockRejectedValue(error)
   } as unknown as OrcaRuntimeService
   return new RpcDispatcher({ runtime, methods: AI_VAULT_METHODS })
@@ -195,6 +199,7 @@ describe('aiVault.prepareSessionResume', () => {
     const prepareAiVaultSessionResume = vi.fn().mockResolvedValue({ useRealCodexHome: true })
     const runtime = {
       getRuntimeId: () => 'test-runtime',
+      ensureStructuredAgentSessionHost: vi.fn(async () => undefined),
       prepareAiVaultSessionResume
     } as unknown as OrcaRuntimeService
     const dispatcher = new RpcDispatcher({ runtime, methods: AI_VAULT_METHODS })
@@ -215,6 +220,65 @@ describe('aiVault.prepareSessionResume', () => {
       codexHome: '/managed',
       executionHostId: 'local'
     })
+  })
+})
+
+// Session history and terminal resume are not chats: a process whose chats are refused still
+// serves them, while any other host failure still fails the request.
+describe('aiVault methods without a structured host', () => {
+  const refusal = agentSessionRefusalError(
+    'agent_session_journal_unreadable',
+    { reason: 'journalCorrupt' },
+    'Unable to load this chat.'
+  )
+
+  beforeEach(() => {
+    resetAiVaultSessionListCacheForTests()
+    scanAiVaultSessionsInWorker.mockReset()
+    scanAiVaultSessionsInWorker.mockResolvedValue(makeResult())
+    recordStructuredAgentSessionHostInstallRefusal(refusal)
+  })
+
+  afterEach(() => {
+    recordStructuredAgentSessionHostInstallRefusal(null)
+    resetAiVaultSessionListCacheForTests()
+  })
+
+  function refusedDispatcher(installError: Error): RpcDispatcher {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the two aiVault handlers read only these runtime members.
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      ensureStructuredAgentSessionHost: vi.fn().mockRejectedValue(installError),
+      listAiVaultSessions: (args?: Parameters<typeof listAiVaultSessions>[0]) =>
+        listAiVaultSessions(args),
+      prepareAiVaultSessionResume: vi.fn().mockResolvedValue({ useRealCodexHome: true })
+    } as unknown as OrcaRuntimeService
+    return new RpcDispatcher({ runtime, methods: AI_VAULT_METHODS })
+  }
+
+  it('lists and prepares a resume while chats are refused', async () => {
+    const dispatcher = refusedDispatcher(refusal)
+
+    await expect(
+      dispatcher.dispatch(makeRequest('aiVault.listSessions', { limit: 500 }))
+    ).resolves.toMatchObject({ ok: true, result: makeResult() })
+    await expect(
+      dispatcher.dispatch(
+        makeRequest('aiVault.prepareSessionResume', {
+          agent: 'codex',
+          filePath: '/managed/sessions/rollout-a.jsonl',
+          codexHome: '/managed'
+        })
+      )
+    ).resolves.toMatchObject({ ok: true, result: { useRealCodexHome: true } })
+  })
+
+  it('still fails on a host error that refuses nothing', async () => {
+    const dispatcher = refusedDispatcher(new Error('the record store would not open'))
+
+    await expect(
+      dispatcher.dispatch(makeRequest('aiVault.listSessions', { limit: 500 }))
+    ).resolves.toMatchObject({ ok: false })
   })
 })
 

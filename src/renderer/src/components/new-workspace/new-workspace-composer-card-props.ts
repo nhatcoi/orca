@@ -18,6 +18,7 @@ import type { SparsePreset } from '../../../../shared/worktree/create-types'
 import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 import type { TaskSourceContext } from '../../../../shared/task-source-context'
 import type { TuiAgent } from '../../../../shared/tui-agent'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 
 export type RepoOption = React.ComponentProps<typeof RepoCombobox>['repos'][number]
 export type EphemeralVmRecipeOption = NonNullable<OrcaHooks['environmentRecipes']>[number]
@@ -29,6 +30,7 @@ export const EMPTY_EPHEMERAL_VM_RECIPES: EphemeralVmRecipeOption[] = []
 export type NewWorkspaceComposerCardProps = {
   contextualTourSource?: string
   containerClassName?: string
+  contentClassName?: string
   composerRef?: React.RefObject<HTMLDivElement | null>
   onComposerNodeChange?: (node: HTMLDivElement | null) => void
   nameInputRef?: React.RefObject<HTMLInputElement | null>
@@ -61,10 +63,19 @@ export type NewWorkspaceComposerCardProps = {
   onNameValueChange: (value: string) => void
   branchNameOverride: string | undefined
   onBranchNameOverrideChange: (value: string | undefined) => void
+  baseBranch?: string
+  onBaseBranchChange?: (value: string | undefined) => void
+  startFromResetHint?: string | null
+  parentWorktreeId?: string | null
+  onParentWorktreeIdChange?: (value: string | null) => void
+  selectedRepoExecutionHostId?: ExecutionHostId | null
+  selectedRepoProjectId?: string | null
+  activeFolderWorkspaceId?: string | null
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
   onSmartGitLabItemSelect: (item: GitLabWorkItem) => void
   onSmartBranchSelect: (refName: string, localBranchName: string) => void
   onSmartNameModeChange?: (mode: SmartNameMode) => void
+  smartNameMode?: SmartNameMode
   onSmartLinearIssueSelect: (issue: LinearIssue) => void
   onSmartJiraIssueSelect?: (issue: JiraIssue, sourceContext: TaskSourceContext) => void
   onOpenJiraSettings?: () => void

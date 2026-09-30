@@ -144,7 +144,14 @@ export function reconcileClientOwnedTabPlacement(
     if (working.has(requestedGroupId) || layoutGroupIds.has(requestedGroupId)) {
       return requestedGroupId
     }
-    return activeGroupIdIfValid ?? groupOrder[0]
+    // Why: with no local group to join, repair the rendered leaf first; failing that,
+    // materialize the requested group so a tab is never published into an unrendered one.
+    return (
+      activeGroupIdIfValid ??
+      groupOrder[0] ??
+      layoutGroupIds.values().next().value ??
+      requestedGroupId
+    )
   }
 
   const movedTabIds = new Set<string>()
@@ -206,13 +213,18 @@ export function reconcileClientOwnedTabPlacement(
         : (group.activeTabId ?? tabOrder[0] ?? null))
     const validActiveTabId =
       activeTabId && tabOrder.includes(activeTabId) ? activeTabId : (tabOrder[0] ?? null)
+    const sanitizedRecent = sanitizeRecentTabIds(group.recentTabIds, tabOrder)
+    // Why: only explicit intent or a close/move successor is a visit; retaining the active tab or
+    // structurally filling an empty group must not reorder MRU.
+    const recordsVisit = validActiveTabId === intentActive || displacedActive !== null
     reconciled.push({
       ...group,
       tabOrder,
       activeTabId: validActiveTabId,
-      recentTabIds: validActiveTabId
-        ? pushRecentTabId(sanitizeRecentTabIds(group.recentTabIds, tabOrder), validActiveTabId)
-        : []
+      recentTabIds:
+        validActiveTabId && recordsVisit
+          ? pushRecentTabId(sanitizedRecent, validActiveTabId)
+          : sanitizedRecent
     })
   }
 

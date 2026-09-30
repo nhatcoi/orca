@@ -14,11 +14,7 @@ import {
   NATIVE_CHAT_QUESTION_STEP_MS,
   NATIVE_CHAT_SUBMIT_DELAY_MS
 } from '../../../../shared/native-chat-answer-stepping'
-import {
-  buildNativeChatImagePasteBytes,
-  buildNativeChatPasteBytes,
-  NATIVE_CHAT_SUBMIT
-} from './native-chat-send'
+import { buildNativeChatPasteBytes, NATIVE_CHAT_SUBMIT } from './native-chat-send'
 import {
   AGENT_TUI_COMMAND_KEY_INTERVAL_MS,
   typeAgentTuiCommand
@@ -32,8 +28,6 @@ import {
 
 export { NATIVE_CHAT_ADVANCE_BUFFER_MS, NATIVE_CHAT_QUESTION_STEP_MS, NATIVE_CHAT_SUBMIT_DELAY_MS }
 export { resetNativeChatPtySendQueuesForTests }
-
-export const NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS = 300
 
 // Why: agent TUI composers treat Ctrl+U as kill-to-start-of-line. Chat sends
 // start from an empty line so a prior cancelled paste cannot glue onto the next
@@ -73,12 +67,17 @@ export type NativeChatSendHandle = {
 
 type RuntimeSettings = ReturnType<typeof getSettingsForAgentTabRuntimeOwner>
 
-function clearUnsubmittedAgentInput(
+export function clearUnsubmittedAgentInput(
   settings: RuntimeSettings,
   ptyId: string,
   options?: NativeChatSendOptions
 ): void {
-  sendRuntimePtyInput(settings, ptyId, options?.clearInput ?? NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT)
+  sendRuntimePtyInput(
+    settings,
+    ptyId,
+    options?.clearInput ?? NATIVE_CHAT_CLEAR_UNSUBMITTED_INPUT,
+    'driving'
+  )
 }
 
 /**
@@ -89,7 +88,7 @@ function clearUnsubmittedAgentInput(
  * draft is still visible — the injected line count is only a lower bound on what
  * the buffer holds, since the user can type into the TUI directly.
  */
-function clearThenWrite(
+export function clearThenWrite(
   settings: RuntimeSettings,
   ptyId: string,
   options: NativeChatSendOptions | undefined,
@@ -110,14 +109,14 @@ function clearThenWrite(
       // An unreadable terminal is unconfirmed; the maximal clear remains safe.
     }
     if (!cleared) {
-      sendRuntimePtyInput(settings, ptyId, AGENT_TUI_CLEAR_INPUT_MAX)
+      sendRuntimePtyInput(settings, ptyId, AGENT_TUI_CLEAR_INPUT_MAX, 'driving')
     }
     writeBody()
   })
 }
 
 /** Extra time a send needs when it stops to confirm the clear before the body. */
-function clearConfirmDurationMs(options?: NativeChatSendOptions): number {
+export function clearConfirmDurationMs(options?: NativeChatSendOptions): number {
   return options?.confirmCleared ? NATIVE_CHAT_CLEAR_CONFIRM_MS : 0
 }
 
@@ -146,11 +145,11 @@ export function sendNativeChatMessage(
         if (isCancelled()) {
           return
         }
-        sendRuntimePtyInput(settings, ptyId, buildNativeChatPasteBytes(text))
+        sendRuntimePtyInput(settings, ptyId, buildNativeChatPasteBytes(text), 'driving')
         // Schedule from the actual body write: an overdue clear-confirm callback
         // must not collapse the required body-to-Enter gap after a renderer stall.
         delay(NATIVE_CHAT_SUBMIT_DELAY_MS, () => {
-          sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT)
+          sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT, 'driving')
           markSubmitted()
         })
       })
@@ -209,12 +208,13 @@ export async function sendNativeChatMessageVerified(
   const bodyAccepted = await sendRuntimePtyInputVerified(
     settings,
     ptyId,
-    buildNativeChatPasteBytes(text)
+    buildNativeChatPasteBytes(text),
+    'driving'
   )
   if (!bodyAccepted || signal?.aborted || !(await waitForNativeChatSubmit(signal))) {
     return false
   }
-  return sendRuntimePtyInputVerified(settings, ptyId, NATIVE_CHAT_SUBMIT)
+  return sendRuntimePtyInputVerified(settings, ptyId, NATIVE_CHAT_SUBMIT, 'driving')
 }
 
 /** Types a slash command as individual keys so Codex opens its command palette. */
@@ -230,7 +230,7 @@ export async function typeNativeChatCommand(
     command,
     signal,
     write: async (key) =>
-      (await sendRuntimePtyInputVerified(settings, ptyId, key)) ? 'accepted' : 'rejected'
+      (await sendRuntimePtyInputVerified(settings, ptyId, key, 'driving')) ? 'accepted' : 'rejected'
   })
   return outcome === 'accepted'
 }
@@ -259,7 +259,9 @@ export function sendNativeChatTypedCommand(
           if (isCancelled()) {
             return 'rejected'
           }
-          return (await sendRuntimePtyInputVerified(settings, ptyId, key)) ? 'accepted' : 'rejected'
+          return (await sendRuntimePtyInputVerified(settings, ptyId, key, 'driving'))
+            ? 'accepted'
+            : 'rejected'
         }
       }).then(finish, () => finish('rejected'))
     },
@@ -272,61 +274,10 @@ export function sendNativeChatTypedCommand(
   )
 }
 
-export function sendNativeChatMessageWithImageAttachments(
-  settings: RuntimeSettings,
-  ptyId: string,
-  text: string,
-  imagePaths: readonly string[],
-  options?: NativeChatSendOptions
-): NativeChatSendHandle {
-  if (imagePaths.length === 0) {
-    return sendNativeChatMessage(settings, ptyId, text, options)
-  }
-  const trimmedText = text.trim()
-  const durationMs =
-    (trimmedText.length > 0
-      ? NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS + NATIVE_CHAT_SUBMIT_DELAY_MS
-      : NATIVE_CHAT_SUBMIT_DELAY_MS) + clearConfirmDurationMs(options)
-  return enqueueNativeChatPtySend(
-    ptyId,
-    durationMs,
-    ({ isCancelled, delay, markSubmitted }) => {
-      if (isCancelled()) {
-        return
-      }
-      clearThenWrite(settings, ptyId, options, delay, () => {
-        if (isCancelled()) {
-          return
-        }
-        for (const imagePath of imagePaths) {
-          sendRuntimePtyInput(settings, ptyId, buildNativeChatImagePasteBytes(imagePath))
-        }
-        if (trimmedText.length > 0) {
-          delay(NATIVE_CHAT_IMAGE_ATTACHMENT_SETTLE_MS, () => {
-            sendRuntimePtyInput(settings, ptyId, buildNativeChatPasteBytes(text))
-            delay(NATIVE_CHAT_SUBMIT_DELAY_MS, () => {
-              sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT)
-              markSubmitted()
-            })
-          })
-          return
-        }
-        delay(NATIVE_CHAT_SUBMIT_DELAY_MS, () => {
-          sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT)
-          markSubmitted()
-        })
-      })
-    },
-    {
-      onCancelUnsubmitted: () => clearUnsubmittedAgentInput(settings, ptyId, options)
-    }
-  )
-}
-
 /** Submit a TUI prompt with no body (Enter only) — e.g. a plain submit when the
  *  composer is empty. */
 export function submitNativeChatPrompt(settings: RuntimeSettings, ptyId: string): void {
-  sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT)
+  sendRuntimePtyInput(settings, ptyId, NATIVE_CHAT_SUBMIT, 'driving')
 }
 
 /**
@@ -354,10 +305,10 @@ export function sendNativeChatAskAnswer(
           // Why: inference must use the remote host's acceptance result, not
           // the fire-and-forget renderer dispatch result.
           verifiedWrites.push(
-            sendRuntimePtyInputVerified(settings, ptyId, bytes).catch(() => false)
+            sendRuntimePtyInputVerified(settings, ptyId, bytes, 'driving').catch(() => false)
           )
         } else {
-          sendRuntimePtyInput(settings, ptyId, bytes)
+          sendRuntimePtyInput(settings, ptyId, bytes, 'driving')
         }
       }, index * NATIVE_CHAT_QUESTION_STEP_MS)
     )

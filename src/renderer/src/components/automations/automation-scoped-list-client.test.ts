@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AUTOMATION_OWNER_CONFLICT_CODES } from '../../../../shared/automation-owner-conflict'
 import {
   AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY
+  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
+  AUTOMATION_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 
 const callRuntimeRpc = vi.fn()
@@ -27,7 +28,8 @@ const SSH_OWNER = {
 const ALL_CAPABILITIES = {
   capabilities: [
     AUTOMATION_LIST_HOST_SCOPE_RUNTIME_CAPABILITY,
-    AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY
+    AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
+    AUTOMATION_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY
   ]
 }
 
@@ -286,7 +288,7 @@ describe('owner-fenced mutations', () => {
   })
 
   it('fences a desktop mutation over the local runtime target with the same precondition', async () => {
-    const { deleteAutomationForOwner, updateAutomationForOwner } = await client()
+    const { updateAutomationForOwner } = await client()
     callRuntimeRpc.mockResolvedValue({ automation: { id: 'a1' } })
     await updateAutomationForOwner({ authority: DESKTOP, selector: { kind: 'self' } }, 'a1', {
       enabled: true
@@ -298,7 +300,6 @@ describe('owner-fenced mutations', () => {
       expect.anything()
     )
     expect(getRuntimeEnvironmentStatus).not.toHaveBeenCalled()
-    expect(typeof deleteAutomationForOwner).toBe('function')
   })
 })
 

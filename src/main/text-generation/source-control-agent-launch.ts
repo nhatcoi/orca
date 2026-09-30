@@ -3,7 +3,10 @@ import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { resolveCliCommand } from '../codex-cli/command'
 import { wslAwareSpawn } from '../git/runner'
 import { getSpawnArgsForWindows } from '../win32-utils'
-import type { SpawnSourceControlAgent } from './source-control-text-generation-types'
+import type {
+  SpawnedSourceControlAgentProcess,
+  SpawnSourceControlAgent
+} from './source-control-text-generation-types'
 
 const WSL_LAUNCHER_ENV_KEYS = [
   'ComSpec',
@@ -36,14 +39,23 @@ function buildWslLauncherEnv(explicitEnv: NodeJS.ProcessEnv | undefined): NodeJS
 export const spawnSourceControlAgent: SpawnSourceControlAgent = (input) => {
   const spawnEnv = input.env ?? process.env
   if (process.platform === 'win32' && input.wslDistro) {
-    return wslAwareSpawn(input.binary, input.args, {
-      cwd: input.cwd,
-      env: buildWslLauncherEnv(input.env),
-      stdio: [input.stdinMode, 'pipe', 'pipe'],
-      windowsHide: true,
-      wslDistro: input.wslDistro,
-      useWslLoginShell: true
-    })
+    // Apply assignments in the guest after its login shell, not to the Windows launcher.
+    const assignments = Object.entries(input.commandEnv ?? {}).map(
+      ([key, value]) => `${key}=${value}`
+    )
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: WSL spawn pipes both output streams and supplies the configured stdin stream.
+    return wslAwareSpawn(
+      assignments.length ? '/usr/bin/env' : input.binary,
+      assignments.length ? [...assignments, input.binary, ...input.args] : input.args,
+      {
+        cwd: input.cwd,
+        env: buildWslLauncherEnv(input.env),
+        stdio: [input.stdinMode, 'pipe', 'pipe'],
+        windowsHide: true,
+        wslDistro: input.wslDistro,
+        useWslLoginShell: true
+      }
+    ) as SpawnedSourceControlAgentProcess
   }
   const resolvedBinary =
     process.platform === 'win32'

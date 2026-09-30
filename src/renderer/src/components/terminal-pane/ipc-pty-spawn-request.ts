@@ -2,11 +2,19 @@ import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from './p
 
 type PtyConnectOptions = Parameters<PtyTransport['connect']>[0]
 
+/** `incarnationId` names which lifetime of the returned id this spawn owns; absent when the
+ *  execution host predates the field. It is deliberately NOT on `PtyConnectResult` — only the
+ *  connect handshake needs it, to fence buffered state left by an earlier owner of the same id. */
+export type IpcPtySpawnResponse = PtyConnectResult & {
+  isReattach?: boolean
+  incarnationId?: string
+}
+
 export async function spawnIpcPty(
   transportOptions: IpcPtyTransportOptions,
   connectOptions: PtyConnectOptions,
   admittedSessionId?: string
-): Promise<PtyConnectResult & { isReattach?: boolean }> {
+): Promise<IpcPtySpawnResponse> {
   const {
     cwd,
     cwdFallback,
@@ -26,10 +34,13 @@ export async function spawnIpcPty(
     shellOverride,
     projectRuntime,
     terminalColorQueryReplies,
+    terminalKittyKeyboardProtocol,
     telemetry
   } = transportOptions
   const shouldSendLocalCwdFallback =
     cwdFallback === 'worktree' && !connectionId && !admittedSessionId
+  // Why: a reattach under an admitted session id must never stop the PTY it is reattaching.
+  const replacesPtyId = admittedSessionId ? null : (connectOptions.claimReplacedPtyId?.() ?? null)
   return window.api.pty.spawn({
     cols: connectOptions.cols ?? 80,
     rows: connectOptions.rows ?? 24,
@@ -66,9 +77,11 @@ export async function spawnIpcPty(
     worktreeId,
     ...(tabId ? { tabId } : {}),
     ...(leafId ? { leafId } : {}),
+    ...(replacesPtyId ? { replacesPtyId } : {}),
     ...(shellOverride ? { shellOverride } : {}),
     ...(projectRuntime ? { projectRuntime } : {}),
     ...(terminalColorQueryReplies ? { terminalColorQueryReplies } : {}),
+    ...(terminalKittyKeyboardProtocol === true ? { terminalKittyKeyboardProtocol: true } : {}),
     ...(telemetry ? { telemetry } : {})
-  }) as Promise<PtyConnectResult & { isReattach?: boolean }>
+  })
 }

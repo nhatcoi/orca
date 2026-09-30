@@ -1,4 +1,5 @@
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
+import { separateImagePasteFromFollowingText } from '../../../../shared/image-paste-following-text'
 import { shellEscapePath } from './pane-helpers'
 import type { PtyTransport } from './pty-transport'
 import { wrapTerminalBracketedPasteText } from './terminal-bracketed-paste'
@@ -65,10 +66,13 @@ export async function writeTerminalDropPathsToCapturedTarget({
       canPasteImageDropPathRaw(nextPath, targetShell)
     const needsSeparatorAfterImage = nextPath !== undefined && !nextPathIsRawPasteImage
     const payload = pathIsRawPasteImage
-      ? `${wrapTerminalBracketedPasteText(path)}${needsSeparatorAfterImage ? ' ' : ''}`
+      ? separateImagePasteFromFollowingText(
+          wrapTerminalBracketedPasteText(path),
+          needsSeparatorAfterImage
+        )
       : `${shellEscapePath(path, targetShell)} `
     const writeResult = await runTerminalPasteOperationWithTimeout(
-      () => writeTerminalPastePtyInput(liveTransport, payload),
+      () => writeTerminalPastePtyInput(liveTransport, payload, 'driving'),
       operationTimeoutMs
     )
     if (writeResult.timedOut) {

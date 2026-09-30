@@ -1,3 +1,4 @@
+import type { GhAccountBinding } from '../../../../shared/github/account-binding'
 import type { SshRepoReadoption } from '../../../../shared/ssh-types'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import type {
@@ -55,6 +56,7 @@ export type RepoUpdate = Partial<
   agentWorktreeVisibility?: Repo['agentWorktreeVisibility'] | null
   sourceControlAi?: Repo['sourceControlAi'] | null
   externalWorktreeDiscoverySuppressedAt?: Repo['externalWorktreeDiscoverySuppressedAt'] | null
+  ghAccount?: GhAccountBinding | null
 }
 
 export type ProjectUpdate = ProjectUpdateArgs['updates']
@@ -130,7 +132,11 @@ export type DeleteProjectGroupWithContainedProjectsResult =
 
 export type FolderWorkspacePathStatusRouteOptions = { runtimeEnvironmentId?: string | null }
 
-export type AddRepoPathRouteOptions = { runtimeEnvironmentId?: string | null }
+export type AddRepoPathOptions = {
+  runtimeEnvironmentId?: string | null
+  /** Overrides the host's basename naming for the new project. */
+  displayName?: string
+}
 
 export type RuntimeCatalogFetchOptions = { runtimeEnvironmentId?: string | null }
 
@@ -158,7 +164,7 @@ export type RepoSlice = {
   addRepoPath: (
     path: string,
     kind?: 'git' | 'folder',
-    options?: AddRepoPathRouteOptions
+    options?: AddRepoPathOptions
   ) => Promise<Repo | null>
   setupProjectExistingFolder: (
     args: ProjectHostSetupExistingFolderArgs
@@ -173,7 +179,7 @@ export type RepoSlice = {
     args: ProjectHostSetupDeleteArgs
   ) => Promise<ProjectHostSetupDeleteResult | null>
   setupProjectClone: (args: ProjectHostSetupCloneArgs) => Promise<ProjectHostSetupResult | null>
-  addNonGitFolder: (path: string, options?: AddRepoPathRouteOptions) => Promise<Repo | null>
+  addNonGitFolder: (path: string, options?: AddRepoPathOptions) => Promise<Repo | null>
   scanNestedRepos: (
     path: string,
     connectionId?: string,

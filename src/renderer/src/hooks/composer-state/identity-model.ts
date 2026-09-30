@@ -14,10 +14,14 @@ export type ComposerIdentityModel = {
   setLinkedGitLabMR: React.Dispatch<React.SetStateAction<number | null>>
   baseBranch: string | undefined
   setBaseBranch: React.Dispatch<React.SetStateAction<string | undefined>>
+  baseBranchNamesWorkspace: boolean
+  setBaseBranchNamesWorkspace: React.Dispatch<React.SetStateAction<boolean>>
   compareBaseRef: string | undefined
   setCompareBaseRef: React.Dispatch<React.SetStateAction<string | undefined>>
   branchNameOverride: string | undefined
   setBranchNameOverride: React.Dispatch<React.SetStateAction<string | undefined>>
+  parentWorktreeId: string | null
+  setParentWorktreeId: React.Dispatch<React.SetStateAction<string | null>>
   branchNameOverridePreservesNameEdits: boolean
   setBranchNameOverridePreservesNameEdits: React.Dispatch<React.SetStateAction<boolean>>
   smartNameMode: SmartNameMode

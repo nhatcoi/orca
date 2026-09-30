@@ -1,7 +1,9 @@
+import type { RuntimeHostStatusSnapshot } from '../../../../shared/runtime-host-status'
 import { getTabIdsAwaitingHostHydrationRemount } from '@/lib/parked-terminal-host-hydration'
 import { emitAutomationsChangedWindowEvent } from '@/lib/automations-changed-window-event'
 import { createBackgroundSleepingAgentWakeDispatcher } from '@/lib/wake-sleeping-agents-in-background'
 import { attachMobileMarkdownBridge } from '@/runtime/mobile-markdown-bridge'
+import { remoteRuntimeTerminalColorPush } from '@/runtime/remote-runtime-terminal-color-push'
 import { resetAgentHookCompletionNotificationCoordinators } from '../agent-hook-completion-notifications'
 import { useAppStore } from '../../store'
 import { registerAgentStatusIpcBridge } from './agent-status-ipc-bridge'
@@ -12,6 +14,8 @@ import { createDirectSshBridgeRuntime } from './direct-ssh-bridge-runtime'
 import { registerDirectSshStateIpcBridge } from './direct-ssh-state-ipc-bridge'
 import { registerMobileAndTerminalCloseIpcBridge } from './mobile-terminal-close-ipc-bridge'
 import { registerMobileDriverIpcBridge } from './mobile-driver-ipc-bridge'
+import { registerOrcaProfileAuthIpcBridge } from './orca-profile-auth-ipc-bridge'
+import { registerOsMarkdownFileOpenBridge } from './os-markdown-file-open-bridge'
 import { registerProjectCatalogIpcBridge } from './project-catalog-ipc-bridge'
 import { registerRateLimitIpcBridge } from './rate-limit-ipc-bridge'
 import { registerRemoteWorkspaceIpcBridge } from './remote-workspace-ipc-bridge'
@@ -20,6 +24,7 @@ import { registerSessionTabIpcBridge } from './session-tab-ipc-bridge'
 import { registerSettingsAndSidebarIpcBridge } from './settings-sidebar-ipc-bridge'
 import { registerTabLifecycleIpcBridge } from './tab-lifecycle-ipc-bridge'
 import { registerTerminalPresentationIpcBridge } from './terminal-presentation-ipc-bridge'
+import { registerPtySourceDisownedIpcBridge } from './pty-source-disowned-ipc-bridge'
 import { registerTerminalRequestIpcBridge } from './terminal-request-ipc-bridge'
 import { registerTerminalUiRoutingIpcBridge } from './terminal-ui-routing-ipc-bridge'
 import { registerUpdaterStatusIpcBridge } from './updater-status-ipc-bridge'
@@ -60,6 +65,25 @@ export function installAppLifetimeIpcEvents(
   )
 
   const worktreeRuntime = createWorktreeEventRuntime(unsubs, isRuntimeEnvironmentActive)
+  const statusApi = window.api.runtimeEnvironments
+  if (statusApi?.onStatusChanged) {
+    const apply = (snapshot: RuntimeHostStatusSnapshot): void => {
+      useAppStore.getState().applyRuntimeHostStatusSnapshot(snapshot)
+      remoteRuntimeTerminalColorPush.observeStatusSnapshot(snapshot)
+    }
+    let stopped = false
+    unsubs.push(statusApi.onStatusChanged(apply), () => {
+      stopped = true
+    })
+    void statusApi
+      .getStatusSnapshots()
+      .then((snapshots) => {
+        if (!stopped) {
+          snapshots.forEach(apply)
+        }
+      })
+      .catch((error) => console.error('Failed to read runtime status snapshots:', error))
+  }
   const unsubscribeRuntimeEnvironmentStore = registerRuntimeClientIpcBridge(unsubs, worktreeRuntime)
   registerProjectCatalogIpcBridge(
     unsubs,
@@ -68,7 +92,9 @@ export function installAppLifetimeIpcEvents(
     remountTerminalTabsAwaitingHostHydration
   )
   registerSettingsAndSidebarIpcBridge(unsubs)
+  registerOrcaProfileAuthIpcBridge(unsubs)
   registerWorkspaceShortcutIpcBridge(unsubs)
+  registerOsMarkdownFileOpenBridge(unsubs)
   unsubs.push(
     window.api.ui.onActivateWorktree(({ repoId, worktreeId, setup, startup, defaultTabs }) => {
       void worktreeRuntime
@@ -89,6 +115,7 @@ export function installAppLifetimeIpcEvents(
 
   registerTerminalPresentationIpcBridge(unsubs)
   registerTerminalRequestIpcBridge(unsubs)
+  registerPtySourceDisownedIpcBridge(unsubs)
   registerTerminalUiRoutingIpcBridge(unsubs)
   registerSessionTabIpcBridge(unsubs)
   registerMobileAndTerminalCloseIpcBridge(unsubs, backgroundWakeDispatcher.request)

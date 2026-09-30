@@ -18,6 +18,7 @@ import {
 import { dispatchTerminalShortcutAction } from './terminal-keyboard-action-dispatch'
 import { getLayoutCharacterForCode } from '@/lib/keyboard-layout/layout-base-character'
 import { createTerminalKeyboardReleaseHandlers } from './terminal-keyboard-release-handlers'
+import { synchronizeTerminalKeyboardPane } from './terminal-keyboard-pane-resolution'
 
 const MAX_OBSERVED_ENTER_KEYDOWNS_PER_CODE = 8
 
@@ -45,6 +46,8 @@ type EventContext = KeyboardHandlersDeps & {
 
 export function createTerminalKeyboardEventHandlers(context: EventContext) {
   const {
+    tabId,
+    worktreeId,
     isMac,
     isWindows,
     shortcutPlatform,
@@ -60,6 +63,7 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
     persistLayoutSnapshot,
     toggleExpandPane,
     setSearchOpen,
+    focusSearchInput,
     onSearchSelectedText,
     onRequestClosePane,
     onClearPaneScrollback,
@@ -111,6 +115,11 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
       return
     }
 
+    // The browser's focused xterm helper is the input owner. A split can retain
+    // a stale manager activePaneId after focus moved, so repair it before any
+    // shortcut policy reads pane-scoped host/agent state.
+    const keyboardPane = synchronizeTerminalKeyboardPane(manager, e.target)
+
     const modifiedEnterChord = isWindows ? getModifiedEnterChord(e) : null
     if (
       e.key === 'Enter' &&
@@ -127,7 +136,7 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
       return
     }
 
-    const terminalPaneForImeShortcut = manager.getActivePane() ?? manager.getPanes()[0]
+    const terminalPaneForImeShortcut = keyboardPane
     const hasPendingImeComposition = hasPendingTerminalImeComposition(
       terminalPaneForImeShortcut?.terminal.element
     )
@@ -139,7 +148,7 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
     }
 
     if (matchFileSearchShortcut(e, shortcutPlatform, keybindings, terminalShortcutPolicy)) {
-      const pane = manager.getActivePane() ?? manager.getPanes()[0]
+      const pane = keyboardPane
       const selectedText = normalizeSelectedTextForFileSearch(pane?.terminal.getSelection())
       if (selectedText) {
         e.preventDefault()
@@ -160,7 +169,7 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
       }
       e.preventDefault()
       e.stopImmediatePropagation()
-      const pane = manager.getActivePane() ?? manager.getPanes()[0]
+      const pane = keyboardPane
       if (!pane) {
         return
       }
@@ -170,6 +179,18 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
     }
 
     if (isEditableTarget(e.target)) {
+      if (
+        searchOpenRef.current &&
+        e.target instanceof HTMLElement &&
+        e.target.closest('[data-terminal-search-root]') &&
+        resolveShortcutEvent(e)?.type === 'toggleSearch'
+      ) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        if (!e.repeat) {
+          focusSearchInput()
+        }
+      }
       return
     }
 
@@ -210,7 +231,7 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
     if (action.type === 'sendInput') {
       e.preventDefault()
       e.stopImmediatePropagation()
-      const pane = manager.getActivePane() ?? manager.getPanes()[0]
+      const pane = keyboardPane
       if (!pane) {
         return
       }
@@ -257,6 +278,8 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
     }
 
     dispatchTerminalShortcutAction(action, e, manager, {
+      tabId,
+      worktreeId,
       fallbackCwd,
       expandedPaneIdRef,
       setExpandedPane,
@@ -265,6 +288,8 @@ export function createTerminalKeyboardEventHandlers(context: EventContext) {
       persistLayoutSnapshot,
       toggleExpandPane,
       setSearchOpen,
+      focusSearchInput,
+      searchOpenRef,
       onRequestClosePane,
       onClearPaneScrollback,
       onSetTitle,

@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import { invalidateLocalWorktreeMetadataPruneInputs } from '../../local-worktree-metadata-prune-gate'
 import type {
   Automation,
   AutomationCreateInput,
+  AutomationRun,
   AutomationUpdateInput
 } from '../../../shared/automations-types'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import { normalizeAutomationPrecheck } from '../../../shared/automation-precheck'
-import { nextAutomationOccurrenceAfter } from '../../../shared/automation-schedules'
+import { nextAutomationOccurrenceAfter } from '../../../shared/automation-schedule-occurrences'
 import {
   applyAutomationExecutionTarget,
   deriveAutomationExecutionTargetForCreate,
@@ -37,6 +39,7 @@ export type AutomationDefinitionOperations = {
   storageAuthority: AutomationStorageAuthority
   flush: () => void
   recordCreated: () => void
+  recordAutomationRunsMutation?: (runs: readonly AutomationRun[]) => void
 }
 
 export function listAutomations(state: PersistedState): Automation[] {
@@ -50,6 +53,14 @@ export function createAutomation(
   input: AutomationCreateInput,
   options?: { destination?: AutomationDestination }
 ): Automation {
+  if (input.creationKey) {
+    const existing = (operations.state.automations ?? []).find(
+      (automation) => automation.creationKey === input.creationKey
+    )
+    if (existing) {
+      return existing
+    }
+  }
   const repo = operations.state.repos.find((entry) => entry.id === input.projectId)
   const now = Date.now()
   const workspaceId = input.workspaceMode === 'existing' ? (input.workspaceId ?? null) : null
@@ -72,6 +83,7 @@ export function createAutomation(
   const contexts = getAutomationContextsForRepo(repo, operations.state.projectHostSetups ?? [])
   const automation: Automation = {
     id: randomUUID(),
+    ...(input.creationKey ? { creationKey: input.creationKey } : {}),
     name: input.name.trim() || 'Untitled automation',
     prompt: input.prompt,
     precheck: normalizeAutomationPrecheck(input.precheck),
@@ -253,5 +265,8 @@ export function deleteAutomation(
   operations.state.automationRuns = (operations.state.automationRuns ?? []).filter(
     (entry) => entry.automationId !== id
   )
+  operations.recordAutomationRunsMutation?.(operations.state.automationRuns)
+  // Why: the automation and its unfinished runs were pinning their workspace; both are gone (#17775).
+  invalidateLocalWorktreeMetadataPruneInputs()
   operations.flush()
 }

@@ -13,10 +13,12 @@ import {
 } from './editor-lazy-views'
 import type { EditorConflictNavigation } from './useEditorConflictNavigation'
 import { EditorFileLoadErrorView } from './EditorFileLoadErrorView'
+import { RecoverableRenderErrorBoundary } from '../error-boundaries/RecoverableRenderErrorBoundary'
 import type { FileContent } from './editor-panel-content-types'
 import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
 import { EditorMarkdownFileSurface } from './EditorMarkdownFileSurface'
+import type { MarkdownRenderState } from './markdown-render-mode'
 
 const noopEditorContentChange = (_content: string): void => {}
 const noopEditorSave = async (_content: string): Promise<boolean> => false
@@ -29,6 +31,7 @@ export function EditorEditFileSurface({
   editorViewStateKey,
   diffViewStateKey,
   pdfViewStateKey,
+  pdfPreferenceKey,
   fileContent,
   diffContent,
   editBuffer,
@@ -39,6 +42,7 @@ export function EditorEditFileSurface({
   isCsv,
   isNotebook,
   mdViewMode,
+  inlineMarkdownRenderState,
   isChangesMode,
   sideBySide,
   showMarkdownTableOfContents,
@@ -59,6 +63,7 @@ export function EditorEditFileSurface({
   editorViewStateKey: string
   diffViewStateKey: string
   pdfViewStateKey: string
+  pdfPreferenceKey: string
   fileContent: FileContent | undefined
   diffContent: GitDiffResult | undefined
   editBuffer: string | undefined
@@ -69,6 +74,7 @@ export function EditorEditFileSurface({
   isCsv: boolean
   isNotebook: boolean
   mdViewMode: MarkdownViewMode
+  inlineMarkdownRenderState: MarkdownRenderState | null
   isChangesMode: boolean
   sideBySide: boolean
   showMarkdownTableOfContents: boolean
@@ -98,6 +104,7 @@ export function EditorEditFileSurface({
     return (
       <EditorFileLoadErrorView
         message={fileContent.loadError}
+        code={fileContent.loadErrorCode}
         onRetry={() => reloadContent(activeFile)}
       />
     )
@@ -109,6 +116,7 @@ export function EditorEditFileSurface({
           content={fileContent.content}
           filePath={activeFile.filePath}
           mimeType={fileContent.mimeType}
+          preferenceKey={pdfPreferenceKey}
           scrollCacheKey={pdfViewStateKey}
         />
       )
@@ -159,48 +167,59 @@ export function EditorEditFileSurface({
     )
   }
 
+  // Why: without a key React reuses the instance and skips cleanup (scroll snapshot); key forces a remount per pane+path.
+  const monacoRemountKey = `${viewStateScopeId}\u0000${activeFile.filePath}`
   const monacoEditor = (
-    // Why: without a key React reuses the instance and skips cleanup (scroll snapshot); key forces a remount per pane+path.
-    <MonacoEditor
-      key={`${viewStateScopeId}\u0000${activeFile.filePath}`}
-      fileId={activeFile.id}
-      filePath={activeFile.filePath}
-      viewStateKey={editorViewStateKey}
-      viewStateId={viewStateScopeId}
-      relativePath={activeFile.relativePath}
-      content={currentContent}
-      language={monacoLanguage}
-      // Why: read-only tabs no-op the change/save callbacks so no draft, dirty state, or write can occur.
-      readOnly={activeFile.readOnly === true}
-      liveTail={activeFile.liveTail === true}
-      onContentChange={activeFile.readOnly === true ? noopEditorContentChange : handleContentChange}
-      onSave={
-        activeFile.readOnly === true
-          ? noopEditorSave
-          : isMarkdown
-            ? markdownDocuments.mdSave
-            : handleSave
-      }
-      worktreeId={activeFile.worktreeId}
-      markdownAnnotationsEnabled={markdownAnnotationsEnabled && isMarkdown}
-      conflictDecorationsEnabled={activeFile.conflict?.conflictStatus === 'unresolved'}
-      revealLine={
-        matchesPendingEditorReveal(pendingEditorReveal, activeFile)
-          ? pendingEditorReveal.line
-          : undefined
-      }
-      revealColumn={
-        matchesPendingEditorReveal(pendingEditorReveal, activeFile)
-          ? pendingEditorReveal.column
-          : undefined
-      }
-      revealMatchLength={
-        matchesPendingEditorReveal(pendingEditorReveal, activeFile)
-          ? pendingEditorReveal.matchLength
-          : undefined
-      }
-      markdownDocuments={isMarkdown ? markdownDocuments.markdownDocuments : undefined}
-    />
+    // Why: Monaco's own create effect throws on a broken language/editor init, which would otherwise
+    // unmount the whole workbench; contain it to this pane and let the retry remount the editor.
+    <RecoverableRenderErrorBoundary
+      boundaryId="editor.monaco"
+      surface="code-editor"
+      resetKey={monacoRemountKey}
+    >
+      <MonacoEditor
+        key={monacoRemountKey}
+        fileId={activeFile.id}
+        filePath={activeFile.filePath}
+        viewStateKey={editorViewStateKey}
+        viewStateId={viewStateScopeId}
+        relativePath={activeFile.relativePath}
+        content={currentContent}
+        language={monacoLanguage}
+        // Why: read-only tabs no-op the change/save callbacks so no draft, dirty state, or write can occur.
+        readOnly={activeFile.readOnly === true}
+        liveTail={activeFile.liveTail === true}
+        onContentChange={
+          activeFile.readOnly === true ? noopEditorContentChange : handleContentChange
+        }
+        onSave={
+          activeFile.readOnly === true
+            ? noopEditorSave
+            : isMarkdown
+              ? markdownDocuments.mdSave
+              : handleSave
+        }
+        worktreeId={activeFile.worktreeId}
+        markdownAnnotationsEnabled={markdownAnnotationsEnabled && isMarkdown}
+        conflictDecorationsEnabled={activeFile.conflict?.conflictStatus === 'unresolved'}
+        revealLine={
+          matchesPendingEditorReveal(pendingEditorReveal, activeFile)
+            ? pendingEditorReveal.line
+            : undefined
+        }
+        revealColumn={
+          matchesPendingEditorReveal(pendingEditorReveal, activeFile)
+            ? pendingEditorReveal.column
+            : undefined
+        }
+        revealMatchLength={
+          matchesPendingEditorReveal(pendingEditorReveal, activeFile)
+            ? pendingEditorReveal.matchLength
+            : undefined
+        }
+        markdownDocuments={isMarkdown ? markdownDocuments.markdownDocuments : undefined}
+      />
+    </RecoverableRenderErrorBoundary>
   )
 
   const editorSurface = isMarkdown ? (
@@ -210,6 +229,7 @@ export function EditorEditFileSurface({
       editorViewStateKey={editorViewStateKey}
       currentContent={currentContent}
       mdViewMode={mdViewMode}
+      inlineMarkdownRenderState={inlineMarkdownRenderState}
       showMarkdownTableOfContents={showMarkdownTableOfContents}
       showMarkdownFrontmatter={showMarkdownFrontmatter}
       onCloseMarkdownTableOfContents={onCloseMarkdownTableOfContents}

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { redactKagiSessionToken } from '../../../../../shared/browser-url'
 import { normalizeBrowserHistoryUrl } from '../../../../../shared/workspace-session-browser-history'
 import { resolveBrowserAddressBarSubmission } from '../navigate/browser-address-bar-navigation'
+import { routeWorkspaceDocAddressSubmission } from '../navigate/workspace-doc-address-submission'
 import { deferBrowserPageNavigation } from '../navigate/browser-page-deferred-navigation'
-import { keybindingMatchesAction } from '../../../../../shared/keybindings'
 import type {
   BrowserBackResult,
   BrowserGotoResult,
@@ -12,7 +12,6 @@ import type {
   BrowserTabInfo
 } from '../../../../../shared/runtime-types'
 import type { BrowserPage as BrowserPageState } from '../../../../../shared/browser-workspace-types'
-import { getShortcutPlatform } from '@/hooks/useShortcutLabel'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { isRemoteBrowserPageMissingError } from './remote-browser-stream-errors'
 import type { RemoteBrowserOperationToken } from './remote-browser-stream-tokens'
@@ -26,7 +25,6 @@ import type {
 
 export function useRemoteBrowserPageNavigation({
   browserTab,
-  isActive,
   stagedPage,
   addressBarValue,
   setAddressBarValueFromPage,
@@ -42,7 +40,6 @@ export function useRemoteBrowserPageNavigation({
   setPaneBusy
 }: {
   browserTab: BrowserPageState
-  isActive: boolean
   /** The host has not minted this page yet, so nothing here may be sent to the runtime. */
   stagedPage: boolean
   addressBarValue: string
@@ -67,7 +64,6 @@ export function useRemoteBrowserPageNavigation({
   navigateToUrl: (url: string) => void
   submitAddressBar: () => void
 } {
-  const keybindings = useAppStore((state) => state.keybindings)
   const addBrowserHistoryEntry = useAppStore((state) => state.addBrowserHistoryEntry)
   const lastFiledHistoryRef = useRef<string | null>(null)
 
@@ -197,32 +193,22 @@ export function useRemoteBrowserPageNavigation({
     [runRemoteNavigation]
   )
 
-  // Browser history shortcuts for SSH/runtime browsers.
-  // Why: remote panes have no local webview ref, so route history through runtime RPC instead of WebContents.
-  useEffect(() => {
-    if (!isActive) {
+  const submitAddressBar = (): void => {
+    // A typed workspace path converts this page to its client-local document preview instead of
+    // navigating the remote guest — a runtime-owned tab is where a paired reader actually types.
+    const consumedAsWorkspaceDoc = routeWorkspaceDocAddressSubmission({
+      worktreeId: browserTab.worktreeId,
+      pageId: browserTab.id,
+      value: addressBarValue,
+      onLoadError: (loadError) => {
+        setPaneNotice({ kind: 'direct', text: loadError.description })
+        onUpdatePageState(browserTab.id, { loadError })
+      }
+    })
+    if (consumedAsWorkspaceDoc) {
       return
     }
-    const shortcutPlatform = getShortcutPlatform()
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      const method = keybindingMatchesAction('browser.back', e, shortcutPlatform, keybindings)
-        ? 'browser.back'
-        : keybindingMatchesAction('browser.forward', e, shortcutPlatform, keybindings)
-          ? 'browser.forward'
-          : null
-      if (method === null) {
-        return
-      }
-      e.preventDefault()
-      e.stopPropagation()
-      void runRemoteNavigation(method)
-    }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [isActive, keybindings, runRemoteNavigation])
-
-  const submitAddressBar = (): void => {
-    const submission = resolveBrowserAddressBarSubmission(addressBarValue)
+    const submission = resolveBrowserAddressBarSubmission(addressBarValue, { allowFileUrls: false })
     if (submission.status === 'invalid') {
       // 'direct': the only response to what the user just typed. With an empty address bar no
       // load-error overlay renders either, so outranking this would make Enter do nothing visible.

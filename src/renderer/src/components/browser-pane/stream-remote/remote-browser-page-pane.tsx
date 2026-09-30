@@ -3,7 +3,9 @@ import { useAppStore } from '@/store'
 import { BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY } from '../../../../../shared/protocol-version'
 import type { BrowserPage as BrowserPageState } from '../../../../../shared/browser-workspace-types'
 import { runtimeEnvironmentSupportsCapability } from '@/runtime/runtime-rpc-client'
+import { convertBrowserPageToWorkspaceDoc } from '@/lib/file-preview'
 import { openWorkspaceBrowserTab } from '@/lib/workspace-browser-tab-open'
+import { resolveBrowserSourceUnifiedTab } from '@/lib/browser-workspace-source-resolution'
 import { useBrowserPageChromeFocus } from '../assemble-chrome/use-browser-page-chrome-focus'
 import { useBrowserAddressBarEditSession } from '../assemble-chrome/use-browser-address-bar-edit-session'
 import { useElementGuestFocus } from '../assemble-chrome/browser-page-guest-focus'
@@ -188,7 +190,6 @@ export function RemoteBrowserPagePane({
     submitAddressBar
   } = useRemoteBrowserPageNavigation({
     browserTab,
-    isActive,
     stagedPage,
     addressBarValue,
     setAddressBarValueFromPage,
@@ -354,11 +355,20 @@ export function RemoteBrowserPagePane({
           onOpenLinkInOrcaBrowser={() => {
             const linkUrl = contextMenu.linkUrl!
             setContextMenu(null)
+            const sourceUnifiedTab = resolveBrowserSourceUnifiedTab(
+              useAppStore.getState(),
+              browserTab.id,
+              worktreeId
+            )
             void openWorkspaceBrowserTab({
               workspaceId: worktreeId,
               url: linkUrl,
+              ...(sourceUnifiedTab ? { afterTabId: sourceUnifiedTab.id } : {}),
+              focusOnCreate: false,
+              selectWorktree: false,
               intent: { kind: 'url' },
-              expectedRuntimeEnvironmentId: runtimeEnvironmentId
+              expectedRuntimeEnvironmentId: runtimeEnvironmentId,
+              placementPreference: 'server'
             }).catch((error) => {
               setPaneNotice({
                 kind: 'direct',
@@ -378,6 +388,9 @@ export function RemoteBrowserPagePane({
         onAddressBarChange={setAddressBarValue}
         onSubmitAddressBar={submitAddressBar}
         onNavigateToUrl={navigateToUrl}
+        onOpenWorkspaceDoc={(docLocation) =>
+          convertBrowserPageToWorkspaceDoc(browserTab.id, docLocation)
+        }
         addressBarInputRef={addressBarInputRef}
         addressBarEditSession={addressBarEditSession}
         busy={busy}

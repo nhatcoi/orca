@@ -9,9 +9,11 @@ import { EditorDiffFileSurface } from './EditorDiffFileSurface'
 import { EditorEditFileSurface } from './EditorEditFileSurface'
 import { EditorFileLoadErrorView } from './EditorFileLoadErrorView'
 import type { FileContent } from './editor-panel-content-types'
+import { buildPdfScalePreferenceKey } from './pdf-scale-preference-storage'
 import { translate } from '@/i18n/i18n'
 import { useEditorConflictNavigation } from './useEditorConflictNavigation'
 import { useMarkdownDocuments } from './useMarkdownDocuments'
+import type { MarkdownRenderState } from './markdown-render-mode'
 
 const noopCloseMarkdownTableOfContents = (): void => {}
 
@@ -47,6 +49,7 @@ export function EditorContent({
   isCsv,
   isNotebook,
   mdViewMode,
+  inlineMarkdownRenderState,
   isChangesMode,
   sideBySide,
   showMarkdownTableOfContents = false,
@@ -74,6 +77,7 @@ export function EditorContent({
   isCsv: boolean
   isNotebook: boolean
   mdViewMode: MarkdownViewMode
+  inlineMarkdownRenderState: MarkdownRenderState | null
   isChangesMode: boolean
   sideBySide: boolean
   showMarkdownTableOfContents?: boolean
@@ -103,6 +107,9 @@ export function EditorContent({
     viewStateScopeId === activeFile.id
       ? `${activeFile.filePath}:pdf`
       : `${activeFile.filePath}::${viewStateScopeId}:pdf`
+  // Why: the same absolute path can exist in different worktrees, paired
+  // runtimes, or SSH targets; durable PDF zoom must not cross those owners.
+  const pdfPreferenceKey = buildPdfScalePreferenceKey(activeFile)
   const monacoLanguage = resolvedLanguage === 'notebook' ? 'json' : resolvedLanguage
   const reloadOpenCheckRunDetailsTab = useAppStore((state) => state.reloadOpenCheckRunDetailsTab)
   const markdownDocuments = useMarkdownDocuments(activeFile, isMarkdown, mdViewMode, handleSave)
@@ -185,6 +192,7 @@ export function EditorContent({
       return (
         <EditorFileLoadErrorView
           message={fileContent.loadError}
+          code={fileContent.loadErrorCode}
           onRetry={() => reloadContent(activeFile)}
         />
       )
@@ -228,6 +236,7 @@ export function EditorContent({
         editorViewStateKey={editorViewStateKey}
         diffViewStateKey={diffViewStateKey}
         pdfViewStateKey={pdfViewStateKey}
+        pdfPreferenceKey={pdfPreferenceKey}
         fileContent={fileContents[activeFile.id]}
         diffContent={diffContents[activeFile.id]}
         editBuffer={editBuffers[activeFile.id]}
@@ -238,6 +247,7 @@ export function EditorContent({
         isCsv={isCsv}
         isNotebook={isNotebook}
         mdViewMode={mdViewMode}
+        inlineMarkdownRenderState={inlineMarkdownRenderState}
         isChangesMode={isChangesMode}
         sideBySide={sideBySide}
         showMarkdownTableOfContents={showMarkdownTableOfContents}

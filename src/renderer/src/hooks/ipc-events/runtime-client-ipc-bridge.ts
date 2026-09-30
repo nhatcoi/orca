@@ -137,11 +137,11 @@ export function registerRuntimeClientIpcBridge(
   const runtimeClientEventsSync = createRuntimeClientEventsSync({
     getDesiredEnvironmentIds: () => getRuntimeClientEventEnvironmentIds(useAppStore.getState()),
     getSubscriptionKey: (environmentId) => buildRuntimeClientEventEnvironmentKey([environmentId]),
-    subscribe: (environmentId, onEvent, onError) => {
+    subscribe: (environmentId, onEvent, onError, isCurrent) => {
       const sshGeneration = getEnvironmentSshStateGeneration(environmentId)
       const runtimeGeneration = getRuntimeEnvironmentConnectionGeneration(environmentId)
       const runtimeRevision = getRuntimeEnvironmentRevision(environmentId)
-      return subscribeRuntimeClientEvents(
+      const subscription = subscribeRuntimeClientEvents(
         environmentId,
         (event) => {
           if (
@@ -154,8 +154,18 @@ export function registerRuntimeClientIpcBridge(
         },
         onError,
         () => {
+          if (!isCurrent()) {
+            return
+          }
           invalidateRuntimeClientEventReplay({
             getSshStateReference: () => useAppStore.getState().sshStateByEnvironment,
+            refreshRuntimeStatus: () => {
+              const state = useAppStore.getState()
+              const snapshot = state.runtimeStatusByEnvironmentId.get(environmentId)?.snapshot
+              if (!snapshot || snapshot.transport === 'unknown') {
+                void state.refreshRuntimeEnvironmentStatus(environmentId)
+              }
+            },
             requestProjectRefresh: () => runtimeProjectRefreshScheduler.request(environmentId),
             markEnvironmentSshStateStale: () =>
               useAppStore.getState().markEnvironmentSshStateStale(environmentId),
@@ -165,6 +175,7 @@ export function registerRuntimeClientIpcBridge(
           })
         }
       )
+      return subscription
     },
     onEvent: handleRuntimeClientEvent
   })
